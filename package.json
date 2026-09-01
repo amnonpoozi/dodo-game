@@ -1,0 +1,22 @@
+{
+  "name": "dodo-online",
+  "version": "1.0.0",
+  "description": "DODO — real-time online multiplayer pirate dice game (a Perudo / Liar's Dice variant with custom rules). Authoritative Node/Express/Socket.IO server + vanilla HTML/CSS/JS client.",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "test": "node server/test-bots.js && node server/test-e2e.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.7.5"
+  },
+  "license": "MIT"
+}

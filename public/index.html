@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DODO — Pirate Dice (Online)</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="connBanner" class="conn-banner hidden">Connection lost — reconnecting…</div>
+
+<div id="app">
+
+  <!-- ============================ LOBBY ============================ -->
+  <section id="lobby" class="screen">
+    <h1 class="title">DODO</h1>
+    <p class="tagline">A pirate&rsquo;s game of dice, bluff &amp; nerve &mdash; now online</p>
+
+    <div class="setup-box">
+      <label for="nameInput">Your name</label>
+      <input id="nameInput" maxlength="16" placeholder="Captain…" autocomplete="off" />
+
+      <div class="lobby-actions">
+        <button id="createBtn" class="primary big">Create Room</button>
+        <div class="or">or</div>
+        <div class="join-row">
+          <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button id="joinBtn" class="primary">Join</button>
+        </div>
+        <div class="or">or</div>
+        <div class="bot-setup">
+          <label>Play vs Bots &mdash; total players (you + bots)</label>
+          <div class="player-choice" id="botCount">
+            <button type="button" data-n="2">2</button>
+            <button type="button" data-n="3">3</button>
+            <button type="button" data-n="4">4</button>
+            <button type="button" data-n="5">5</button>
+            <button type="button" data-n="6">6</button>
+          </div>
+          <button id="botBtn" class="primary big">Play vs Bots</button>
+        </div>
+      </div>
+
+      <div id="lobbyMsg" class="msg"></div>
+    </div>
+
+    <details class="rules">
+      <summary>Quick rules</summary>
+      <ul>
+        <li>On your turn: raise the bid, call <strong>Dodo</strong> (the bid is a lie),
+            or call <strong>Believe</strong> (the bid is exactly right).</li>
+        <li>A bid is a <em>quantity</em> and a <em>face</em>, e.g. <em>Three 4s</em> =
+            &ldquo;at least three dice count as 4&rdquo; across all players.</li>
+        <li><strong>1s are wildcards</strong> in normal rounds &mdash; unless the bid itself is on 1s.</li>
+        <li>Switching to a bid on 1s: quantity must be &gt; half the previous quantity
+            (<code>floor(prev/2)+1</code>). Switching back from 1s: double the quantity.</li>
+        <li><strong>Check</strong>: only with exactly 5 dice forming Five of a Kind,
+            All Different, or Full House. It skips your turn; the bid stays.</li>
+        <li><strong>Blind Round</strong>: when a player drops to exactly 1 die.
+            Nobody sees any dice; the lone die sets a secret target; bids are quantity only;
+            1s are <em>not</em> wild.</li>
+      </ul>
+    </details>
+  </section>
+
+  <!-- ============================ WAITING ROOM ============================ -->
+  <section id="room" class="screen hidden">
+    <h1 class="title">DODO</h1>
+    <div class="setup-box">
+      <div class="room-code">Room code<strong id="roomCodeText">----</strong></div>
+      <p class="hint">Share this code with your crew. 2&ndash;6 players. Everyone starts with 5 dice.</p>
+
+      <div id="playerCount" class="player-count">Players: 0 / 6</div>
+      <ul id="playerList" class="player-list"></ul>
+
+      <button id="startBtn" class="primary big hidden">Start Game</button>
+      <p id="roomWait" class="hint hidden">Waiting for the host to start the game…</p>
+      <div id="roomMsg" class="msg"></div>
+
+      <button id="leaveBtn" class="ghost">Leave room</button>
+    </div>
+  </section>
+
+  <!-- ============================ GAME ============================ -->
+  <section id="game" class="screen hidden">
+    <header class="topbar">
+      <span class="brand">DODO</span>
+      <span id="roundBadge" class="badge">Normal Round</span>
+      <span id="roomTag"></span>
+      <button id="leaveGameBtn" class="ghost">Leave</button>
+    </header>
+
+    <div class="layout">
+      <!-- table -->
+      <div class="table-wrap">
+        <div class="table-felt">
+          <div class="felt-emblem" aria-hidden="true"></div>
+
+          <div id="seats" class="seats"></div>
+
+          <div class="table-center">
+            <div class="bid-card">
+              <div class="bid-label">Current Bid</div>
+              <div id="bidValue" class="bid-value">&mdash;</div>
+              <div id="bidMeta" class="bid-meta"></div>
+              <div id="hiddenTarget" class="hidden-target hidden">Hidden Target: <span>?</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- side panel -->
+      <aside class="side">
+        <div class="turn-line" id="turnLine">Your turn</div>
+
+        <div class="controls" id="controls">
+          <div class="row qty-row">
+            <label>Quantity</label>
+            <div class="stepper">
+              <button id="qtyMinus" type="button">&minus;</button>
+              <input id="qtyInput" type="number" min="1" value="1" />
+              <button id="qtyPlus" type="button">&plus;</button>
+            </div>
+          </div>
+
+          <div class="row face-row" id="faceRow">
+            <label>Face</label>
+            <div class="face-picker" id="facePicker"></div>
+          </div>
+
+          <div class="row btn-row">
+            <button id="bidBtn" class="primary" type="button">Place Bid</button>
+            <button id="dodoBtn" class="danger" type="button">Dodo</button>
+            <button id="believeBtn" class="believe" type="button">Believe</button>
+            <button id="checkBtn" class="check" type="button">Check</button>
+          </div>
+
+          <div id="msg" class="msg"></div>
+        </div>
+
+        <div class="history-box">
+          <h3>Action History</h3>
+          <ul id="history"></ul>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============================ OVERLAY (reveal / winner) ============================ -->
+  <div id="overlay" class="overlay hidden">
+    <div class="modal" id="modal"></div>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="client.js"></script>
+</body>
+</html>

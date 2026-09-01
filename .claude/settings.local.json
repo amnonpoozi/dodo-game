@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd *)",
+      "Bash(pkill -f \"http.server 8792\")",
+      "Bash(python -)",
+      "Bash(rm -f _clientboot.html _clientboot2.html _min.html _render.html)",
+      "Bash(pkill -f \"http.server 879\")"
+    ]
+  }
+}
