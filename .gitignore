@@ -1,0 +1,14 @@
+# dependencies (Render / any host runs `npm ci` to install these)
+node_modules/
+
+# logs & runtime junk
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# local tooling state (not part of the app)
+.claude/

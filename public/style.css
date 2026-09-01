@@ -122,6 +122,8 @@ button.primary  { background: linear-gradient(180deg, #d8a94e, var(--gold-deep))
 button.danger   { background: linear-gradient(180deg, #c8493c, var(--danger)); }
 button.believe  { background: linear-gradient(180deg, #4c9a71, var(--believe)); }
 button.check    { background: linear-gradient(180deg, #4d78bf, var(--check)); }
+/* one Check per player per round — this player has spent theirs */
+button.check.spent::after { content: " \2714"; }
 button.ghost {
   background: transparent;
   border-color: var(--wood-2);
@@ -277,12 +279,21 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
    die, name tag or turn ring overlaps its neighbour. */
 .seats.players-5, .seats.players-6 { position: static; }
 .table-felt:has(.seats.players-5),
-.table-felt:has(.seats.players-6) { min-height: 600px; }
+.table-felt:has(.seats.players-6) { min-height: 560px; }
 
-.seats.players-5 .seat, .seats.players-6 .seat { width: 146px; gap: 3px; }
-.seats.players-5 .cup,  .seats.players-6 .cup  { width: 114px; height: 72px; }
-.seats.players-5 .cup-vessel, .seats.players-6 .cup-vessel {
-  width: 114px; margin-left: -57px; height: 68px;
+.seats.players-5 .seat, .seats.players-6 .seat { width: 132px; gap: 3px; }
+.seats.players-5 .cup,  .seats.players-6 .cup  { width: 84px; height: 74px; }
+.seats.players-5 .cup-img, .seats.players-6 .cup-img { width: 84px; }
+.seats.players-5 .cup.lifted .cup-img, .seats.players-6 .cup.lifted .cup-img {
+  transform: translateX(-50%) translateY(-38px) rotate(-7deg);
+}
+.seats.players-5 .seat.pos-top .cup.lifted .cup-img,
+.seats.players-5 .seat.pos-topleft .cup.lifted .cup-img,
+.seats.players-5 .seat.pos-topright .cup.lifted .cup-img,
+.seats.players-6 .seat.pos-top .cup.lifted .cup-img,
+.seats.players-6 .seat.pos-topleft .cup.lifted .cup-img,
+.seats.players-6 .seat.pos-topright .cup.lifted .cup-img {
+  transform: translateX(-50%) translateY(-32px) rotate(-6deg);
 }
 .seats.players-5 .cup-dice .die, .seats.players-6 .cup-dice .die { width: 21px; height: 21px; }
 
@@ -304,10 +315,23 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   pointer-events: none;
 }
 .seat.active::after { opacity: 1; }
-.seat.active .cup { transform: scale(1.05); }
 
 .seat.eliminated { opacity: 0.42; filter: grayscale(0.7); }
 .seat.eliminated .seat-name { text-decoration: line-through; }
+
+/* round result — winner / loser highlight on the seat */
+.seat.win::after,
+.seat.lose::after { opacity: 1; }
+.seat.win::after {
+  box-shadow: 0 0 0 3px var(--ok), 0 0 34px 6px rgba(111, 191, 115, 0.65);
+}
+.seat.lose::after {
+  box-shadow: 0 0 0 3px var(--danger), 0 0 34px 6px rgba(178, 58, 46, 0.7);
+}
+.seat.win  .seat-name { background: linear-gradient(180deg, #2f6b3e, #1f4a2b); border-color: var(--ok); color: #eafce9; }
+.seat.lose .seat-name { background: linear-gradient(180deg, #7a291f, #4a1410); border-color: var(--danger); color: #ffe6e0; }
+.seat.win  .seat-count { background: rgba(111, 191, 115, 0.28); color: #eafce9; }
+.seat.lose .seat-count { background: rgba(178, 58, 46, 0.32); color: #ffe6e0; }
 
 .turn-flag {
   font-size: 10px;
@@ -324,6 +348,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .seat.active .turn-flag { opacity: 1; transform: translateY(0); }
 
 .seat-name {
+  position: relative;
+  z-index: 7;                     /* stays readable even when the cup lifts up behind it */
   font-size: 14px;
   letter-spacing: 0.08em;
   color: var(--gold);
@@ -333,6 +359,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   padding: 4px 14px;
   box-shadow: 0 3px 6px rgba(0,0,0,0.4);
 }
+.turn-flag { position: relative; z-index: 7; }
 .seat.me .seat-name { border-color: var(--gold-deep); color: #fff; }
 
 .seat-count {
@@ -345,100 +372,85 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 
-/* ------------------------- THE DICE CUP ------------------------- */
+/* ------------------------- THE DICE CUP (image) ------------------------- *
+   Each player's cup is one of the six provided PNGs (red/blue/green/yellow/
+   purple/orange), assigned by seat 1..6 and kept for the whole game. The cup
+   sits OVER the dice; "lifted" slides it up and tilts it a little — it stays
+   fully visible, raised above the dice, never removed. The dice stay put in
+   the same spot and just become visible underneath.                         */
 
 .cup {
   position: relative;
-  width: 132px;
-  height: 84px;
-  margin: 4px 0 2px;
-  transition: transform 0.25s ease;
+  width: 96px;
+  height: 82px;
+  margin: 2px 0 0;
 }
 
-/* dice sit on the felt; the cup covers them until it is lifted */
+/* dice live at the bottom-centre of the cup area; hidden until the cup lifts */
 .cup-dice {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 2px;
+  left: -14px;
+  right: -14px;
+  bottom: 0;
   display: flex;
   justify-content: center;
+  align-items: flex-end;
+  flex-wrap: wrap;
   gap: 2px;
+  min-height: 22px;
   opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 0.4s ease 0.12s, transform 0.4s ease 0.12s;
+  transition: opacity 0.3s ease 0.14s;
   z-index: 2;
 }
-.cup.open .cup-dice { opacity: 1; transform: translateY(0); }
-.cup-dice .die { width: 26px; height: 26px; padding: 3px; border-radius: 5px; margin: 0 -1px; }
-.cup-dice .die .pip { width: 5px; height: 5px; }
+.cup.lifted .cup-dice { opacity: 1; }
+.cup-dice .die { width: 22px; height: 22px; padding: 3px; border-radius: 5px; margin: 0 -1px; }
+.cup-dice .die .pip { width: 4px; height: 4px; }
 
-/* the upturned leather cup */
-.cup-vessel {
+/* EXACTLY 5 dice only: on the 2–4-player table the dice render large enough that
+   the 5th used to wrap onto a second row and hide behind the lifted cup. Keep the
+   five on one line and give the row a slightly wider, still-centred track so every
+   die is fully visible. 1–4 dice, the cup size, and the cup animation are untouched. */
+.cup-dice.five {
+  flex-wrap: nowrap;
+  left: -24px;
+  right: -24px;
+}
+@media (max-width: 640px) {
+  /* phone cups are already wide enough for five — keep the track snug so it can't
+     reach a neighbouring seat */
+  .cup-dice.five { left: -14px; right: -14px; }
+}
+
+/* the cup image itself */
+.cup-img {
   position: absolute;
   left: 50%;
-  margin-left: -66px;
   bottom: -4px;
-  width: 132px;
-  height: 78px;
+  width: 96px;
+  height: auto;
+  transform: translateX(-50%) translateY(0) rotate(0);
   transform-origin: 50% 100%;
-  transition: transform 0.55s cubic-bezier(0.2, 0.85, 0.25, 1), opacity 0.45s ease;
+  transition: transform 0.5s cubic-bezier(0.2, 0.85, 0.25, 1);
   z-index: 4;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.5));
 }
-.cup-vessel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  clip-path: polygon(14% 0, 86% 0, 100% 84%, 92% 100%, 8% 100%, 0 84%);
-  background:
-    linear-gradient(90deg, rgba(0,0,0,0.35) 0%, transparent 18% 82%, rgba(0,0,0,0.35) 100%),
-    repeating-linear-gradient(180deg, rgba(0,0,0,0.10) 0 14px, rgba(255,255,255,0.04) 14px 16px),
-    linear-gradient(180deg, #8f5e37 0%, #6f4426 46%, #57351f 100%);
-  box-shadow:
-    inset 0 7px 10px rgba(255,222,176,0.20),
-    inset 0 -16px 22px rgba(0,0,0,0.42);
-  border-radius: 6px 6px 3px 3px;
-}
-/* the open mouth of the cup, resting on the felt */
-.cup-vessel::after {
-  content: "";
-  position: absolute;
-  left: 5%;
-  right: 5%;
-  bottom: -7px;
-  height: 20px;
-  background: radial-gradient(ellipse at 50% 38%, #4a2c19 0%, #35200f 68%, #281808 100%);
-  border-radius: 50%;
-  box-shadow: 0 7px 13px rgba(0,0,0,0.5);
-}
-.cup-rim {
-  position: absolute;
-  left: 9%;
-  right: 9%;
-  top: 0;
-  height: 11px;
-  background: linear-gradient(180deg, #a06f43, #7a4a29);
-  border-radius: 5px 5px 0 0;
-  box-shadow: inset 0 -3px 4px rgba(0,0,0,0.35);
-}
-.cup-shine {
-  position: absolute;
-  top: 9%;
-  left: 17%;
-  width: 15px;
-  height: 58%;
-  background: linear-gradient(180deg, rgba(255,240,215,0.5), rgba(255,240,215,0));
-  filter: blur(2px);
-  border-radius: 50%;
-}
+.cup.lifted .cup-img { transform: translateX(-50%) translateY(-44px) rotate(-7deg); }
 
-.cup.closed .cup-vessel { transform: translateY(0) rotate(0); opacity: 1; }
-.cup.open   .cup-vessel { transform: translateY(-34px) rotate(-16deg); opacity: 0; }
+/* top-row seats: lift a touch less so the raised cup never clips the felt edge */
+.seat.pos-top .cup.lifted .cup-img,
+.seat.pos-topleft .cup.lifted .cup-img,
+.seat.pos-topright .cup.lifted .cup-img { transform: translateX(-50%) translateY(-38px) rotate(-6deg); }
+
+.seat.active .cup-img { filter: drop-shadow(0 0 9px rgba(232, 196, 122, 0.6)) drop-shadow(0 6px 8px rgba(0, 0, 0, 0.5)); }
 
 
 /* ------------------------- DICE ------------------------- */
 
 .die {
+  position: relative;
   width: 42px;
   height: 42px;
   background: linear-gradient(145deg, #fdfaf0, #e6dcc2);
@@ -451,7 +463,16 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   box-shadow: 0 3px 6px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(0,0,0,0.08);
   flex-shrink: 0;
 }
-.die .cell { display: flex; align-items: center; justify-content: center; }
+/* soft glossy highlight (top-left) + faint contact shade (bottom-right), behind the pips */
+.die:not(.hidden)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(158deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.04) 40%, rgba(0,0,0,0.06) 100%);
+  pointer-events: none;
+}
+.die .cell { position: relative; display: flex; align-items: center; justify-content: center; }
 .die .pip {
   width: 8px;
   height: 8px;
@@ -461,6 +482,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .die.small { width: 30px; height: 30px; padding: 3px; border-radius: 6px; }
 .die.small .pip { width: 5px; height: 5px; }
+
+/* inline die inside flowing text (reveal-banner bid recap) */
+.die.die-inline { display: inline-grid; vertical-align: middle; width: 26px; height: 26px; padding: 3px; border-radius: 6px; gap: 2px; }
+.die.die-inline.hidden { display: inline-flex; }
+.die.die-inline .pip { width: 4px; height: 4px; }
 
 .die.hidden {
   display: flex;
@@ -521,21 +547,41 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font-size: 11px;
   color: #7a5a24;
 }
+/* Current Bid:  [ die face ]  ×  [ quantity ]
+   die = WHAT value is bid (large, real pips) · number = HOW MANY */
 .bid-value {
-  font-size: 40px;
-  font-weight: bold;
-  margin: 4px 0;
-  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 8px 0 4px;
+  min-height: 58px;
 }
-.bid-value .x { font-size: 22px; opacity: 0.6; }
+.bid-value .die {
+  width: 56px;
+  height: 56px;
+  padding: 7px;
+  border-radius: 12px;
+  gap: 3px;
+}
+.bid-value .die .pip { width: 10px; height: 10px; }
+.bid-value .die.hidden { border-width: 2px; }
+.bid-value .die.hidden .mark { font-size: 28px; }
+.bid-value .x {
+  font-size: 26px;
+  font-weight: normal;
+  opacity: 0.5;
+  color: #6a4d20;
+}
+.bid-value .bid-qty {
+  font-size: 52px;
+  font-weight: bold;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #3a2a10;
+}
+.bid-value .bid-empty { font-size: 40px; font-weight: bold; color: #6a4d20; }
 .bid-meta { font-size: 12px; color: #6a4d20; min-height: 16px; }
-.hidden-target {
-  margin-top: 8px;
-  font-size: 13px;
-  font-weight: bold;
-  color: #7a1f16;
-  letter-spacing: 0.05em;
-}
 
 
 /* ------------------------- SIDE PANEL ------------------------- */
@@ -731,6 +777,98 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .modal .die { background: linear-gradient(145deg, #fff, #ece2c6); }
 
 
+/* ============================================================
+   ROUND-REVEAL FLOW — on-table banner + dice change animations
+   ============================================================ */
+
+/* the reveal / result panel that sits in the centre of the felt */
+.reveal-banner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  width: min(340px, 78%);
+  padding: 16px 20px;
+  text-align: center;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--parch), var(--parch-2));
+  border: 3px solid #b78e46;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), inset 0 0 0 2px rgba(255, 255, 255, 0.22);
+  animation: bannerIn 0.3s ease;
+}
+@keyframes bannerIn { from { opacity: 0; transform: translate(-50%, -46%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+
+.reveal-banner .rb-title,
+.reveal-banner .rb-reason {
+  font-size: 20px;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  color: #6a3a12;
+}
+.reveal-banner.as-result .rb-reason { font-size: 22px; }
+.reveal-banner .rb-line { font-size: 13px; color: #5c4322; margin: 3px 0; line-height: 1.4; }
+.reveal-banner .rb-bidline { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.reveal-banner .rb-x { opacity: 0.5; }
+.reveal-banner .rb-q { font-size: 16px; font-weight: bold; color: #3a2a10; }
+
+/* special-action announcement: DODO / BELIEVE / CHECK / DODO ON CHECK */
+.reveal-banner .rb-action {
+  font-size: clamp(24px, 6vw, 34px);
+  font-weight: bold;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6a3a12;
+  margin-bottom: 10px;
+  line-height: 1.1;
+}
+.reveal-banner .rb-who { font-size: 13px; color: #5c4322; margin-top: 10px; }
+.reveal-banner.as-action .rb-bidline { font-size: 20px; margin: 8px 0; }
+.reveal-banner.as-action .rb-q { font-size: 26px; }
+.reveal-banner.as-action .die.die-inline { width: 32px; height: 32px; padding: 4px; border-radius: 7px; }
+.reveal-banner.as-action .die.die-inline .pip { width: 5px; height: 5px; }
+.reveal-banner.as-action .die.die-inline.hidden .mark { font-size: 18px; }
+.reveal-banner .rb-target { color: #7a1f16; font-weight: bold; }
+.reveal-banner .rb-hint { font-size: 12px; font-style: italic; color: #7a5a34; margin-top: 8px; }
+.reveal-banner .rb-win,
+.reveal-banner .rb-lose {
+  display: inline-block;
+  margin: 8px 4px 2px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.03em;
+}
+.reveal-banner .rb-win  { background: rgba(111, 191, 115, 0.28); color: #1f4a2b; border: 1px solid var(--ok); }
+.reveal-banner .rb-lose { background: rgba(178, 58, 46, 0.24); color: #6a1a12; border: 1px solid var(--danger); }
+.reveal-banner .rb-next-line { font-size: 12px; color: #6a4d20; margin-top: 8px; }
+.reveal-banner #nextRoundBtn { margin-top: 12px; }
+
+/* a die leaving a player's group (loss) */
+.cup-dice .die.die-leaving {
+  animation: dieLeave 0.72s cubic-bezier(0.4, 0.05, 0.75, 0.95) forwards;
+  z-index: 5;
+}
+@keyframes dieLeave {
+  0%   { opacity: 1; transform: translate(0, 0) rotate(0) scale(1); }
+  35%  { opacity: 1; transform: translate(6px, -14px) rotate(35deg) scale(1.05); }
+  100% { opacity: 0; transform: translate(46px, 52px) rotate(150deg) scale(0.55); }
+}
+
+/* a die entering a player's group (gain from an exact Believe) */
+.cup-dice .die.die-entering {
+  animation: dieEnter 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.25) forwards;
+}
+@keyframes dieEnter {
+  0%   { opacity: 0; transform: translate(-40px, -16px) rotate(-45deg) scale(0.35); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+
+
 /* ------------------------- RESPONSIVE ------------------------- */
 
 @media (max-width: 940px) {
@@ -756,9 +894,14 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* on a phone every seat is a wrapped flex item — same size regardless of count */
   .seats.players-5 .seat, .seats.players-6 .seat { width: auto; }
-  .seats.players-5 .cup,  .seats.players-6 .cup  { width: 132px; height: 84px; }
-  .seats.players-5 .cup-vessel, .seats.players-6 .cup-vessel {
-    width: 132px; margin-left: -66px; height: 78px;
+  .seats.players-5 .cup,  .seats.players-6 .cup,
+  .seats.players-2 .cup,  .seats.players-3 .cup,
+  .seats.players-4 .cup   { width: 132px; height: 108px; }
+  .seats.players-5 .cup-img, .seats.players-6 .cup-img { width: 132px; }
+  .seats.players-5 .cup.lifted .cup-img, .seats.players-6 .cup.lifted .cup-img,
+  .seats.players-5 .seat.pos-top .cup.lifted .cup-img,
+  .seats.players-6 .seat.pos-top .cup.lifted .cup-img {
+    transform: translateX(-50%) translateY(-58px) rotate(-7deg);
   }
 
   #seats {
@@ -777,8 +920,12 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     width: auto;
     min-width: 140px;
   }
-  .table-felt .seat.active .cup { transform: none; }
   .table-center { order: 1; position: static; transform: none; align-self: center; }
+  .reveal-banner {
+    order: 0; position: static; transform: none;
+    width: 100%; max-width: 360px; align-self: center; margin: 4px auto;
+  }
+  @keyframes bannerIn { from { opacity: 0; } to { opacity: 1; } }
 
   .die { width: 34px; height: 34px; padding: 4px; }
   .die .pip { width: 6px; height: 6px; }

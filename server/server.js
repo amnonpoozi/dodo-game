@@ -39,9 +39,27 @@ const BOT_NAMES = [
   'Barnacle Bill', 'Cutlass Kate', 'Old Griggs', 'Redbeard', 'Mad Morgan',
 ];
 
+// Minimum time a round-reveal stays up before the server will accept "next round",
+// so every client gets the full "look at the dice" window (and no client can rush
+// the others past it). Purely a pacing guard — it never changes an outcome.
+// Overridable with DODO_REVEAL_MIN_MS (the test suite runs it fast).
+const REVEAL_MIN_OVERRIDE = Number(process.env.DODO_REVEAL_MIN_MS);
+const REVEAL_MIN_MS = Number.isFinite(REVEAL_MIN_OVERRIDE) ? REVEAL_MIN_OVERRIDE : 3000;
+
+// The player-cup images live in the project root; expose exactly those six files.
+const CUP_FILES = new Set(['red.png', 'blue.png', 'green.png', 'yellow.png', 'purple.png', 'orange.png']);
+
 const app = express();
+// Running behind a reverse proxy on hosts like Render / Railway / Fly — trust the
+// X-Forwarded-* headers so req.protocol / req.ip reflect the real client.
+app.set('trust proxy', true);
+
 app.use(express.static(PUBLIC_DIR));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.count() }));
+app.get('/cups/:file', (req, res) => {
+  if (!CUP_FILES.has(req.params.file)) return res.status(404).end();
+  res.sendFile(path.join(__dirname, '..', req.params.file), { maxAge: '7d' });
+});
 app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 const server = http.createServer(app);
@@ -88,6 +106,7 @@ function buildView(room, pid) {
       diceCount: p.diceCount,
       eliminated: p.eliminated,
       isHost: p.id === room.hostId,
+      usedCheck: !!p.usedCheck,   // spent this round's Check — not secret, lets the UI explain a disabled button
     })),
   };
 
@@ -141,6 +160,10 @@ function buildView(room, pid) {
       checkerId: r.checkerSeat != null ? seatToId(room, r.checkerSeat) : null,
       loserId: r.loserSeat != null ? seatToId(room, r.loserSeat) : null,
       gainerId: r.gainerSeat != null ? seatToId(room, r.gainerSeat) : null,
+      // who acted, so the client can green-glow the round winner. Not secret:
+      // the challenger is simply whoever's turn it was, the bidder the previous one.
+      callerId: seatToId(room, g.turnIndex),
+      bidderId: seatToId(room, g.prevBidderIndex),
       nextStarterId: seatToId(room, g.nextStarterIndex),
       pendingBlind: g.pendingBlind,
       hands: room.players
@@ -197,6 +220,13 @@ function beginGame(room) {
   room.phase = 'playing';
 }
 
+// Enter the round-reveal phase and stamp the time, so nextRound can enforce the
+// minimum "look at the dice" window uniformly for every client.
+function enterReveal(room) {
+  room.phase = 'reveal';
+  room.revealAt = Date.now();
+}
+
 
 /* ---------------- "Play vs Bots" — server drives the bot seats ---------------- *
  * A solo room has exactly one human (the host) and 1..5 bots. When it is a
@@ -242,13 +272,13 @@ function applyBotAction(room, seat, action) {
   if (type === 'dodo' && g.currentBid) {
     if (g.lastActionWasCheck) engine.resolveCheckChallenge(g, seat);
     else engine.resolveDodo(g, seat);
-    room.phase = 'reveal';
+    enterReveal(room);
     return;
   }
 
   if (type === 'believe' && g.currentBid) {
     engine.resolveBelieve(g, seat);
-    room.phase = 'reveal';
+    enterReveal(room);
     return;
   }
 
@@ -271,7 +301,7 @@ function botFallbackMove(room, seat) {
   } else {
     if (g.lastActionWasCheck) engine.resolveCheckChallenge(g, seat);
     else engine.resolveDodo(g, seat);
-    room.phase = 'reveal';
+    enterReveal(room);
   }
 }
 
@@ -313,7 +343,7 @@ function armAutoPlay(room) {
       g.history.push(p.name + ' was away — auto Dodo');
       if (g.lastActionWasCheck) engine.resolveCheckChallenge(g, p.seat);
       else engine.resolveDodo(g, p.seat);
-      room.phase = 'reveal';
+      enterReveal(room);
     }
     broadcastState(room);
   }, AWAY_MS);
@@ -487,7 +517,7 @@ io.on('connection', (socket) => {
 
     if (g.lastActionWasCheck) engine.resolveCheckChallenge(g, actor.seat);
     else engine.resolveDodo(g, actor.seat);
-    room.phase = 'reveal';
+    enterReveal(room);
     broadcastState(room);
   });
 
@@ -500,7 +530,7 @@ io.on('connection', (socket) => {
     if (!g.currentBid) return socket.emit('errorMsg', 'There is no bid to believe yet.');
 
     engine.resolveBelieve(g, actor.seat);
-    room.phase = 'reveal';
+    enterReveal(room);
     broadcastState(room);
   });
 
@@ -510,6 +540,7 @@ io.on('connection', (socket) => {
     const actor = actorOnTurn(room);
     if (!actor) return socket.emit('errorMsg', 'It is not your turn.');
     const g = room.game;
+    if (actor.usedCheck) return socket.emit('errorMsg', 'You have already used your Check this round.');
     if (!engine.canDeclareCheck(g, actor)) return socket.emit('errorMsg', 'You cannot declare Check right now.');
 
     engine.applyCheck(g, actor.seat);
@@ -519,6 +550,8 @@ io.on('connection', (socket) => {
   socket.on('nextRound', () => {
     const room = roomOf();
     if (!room || room.phase !== 'reveal') return;      // guards double-advance
+    // hold every client on the reveal for the same minimum window
+    if (room.revealAt && Date.now() - room.revealAt < REVEAL_MIN_MS) return;
     const g = room.game;
     const alive = engine.activePlayers(g);
     if (alive.length <= 1) {
@@ -555,6 +588,9 @@ io.on('connection', (socket) => {
 });
 
 
+// Bind on all interfaces (0.0.0.0) — never a fixed host — so cloud hosts can route
+// to us. The public URL is whatever the platform assigns; PORT comes from the env.
 server.listen(PORT, () => {
-  console.log('DODO server listening on http://localhost:' + PORT);
+  console.log('DODO server listening on port ' + PORT +
+    (process.env.RENDER_EXTERNAL_URL ? ' — ' + process.env.RENDER_EXTERNAL_URL : ''));
 });

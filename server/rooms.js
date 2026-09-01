@@ -38,6 +38,7 @@ function makePlayer(id, name, socketId, isBot) {
     diceCount: 5,
     dice: [],          // SECRET — never leaves the server except in a reveal payload
     eliminated: false,
+    usedCheck: false,  // has spent this round's one allowed Check (reset in engine.startRound)
   };
 }
 

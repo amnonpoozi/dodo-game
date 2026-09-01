@@ -95,8 +95,20 @@ function chooseNormal(g, seat) {
   const unknown = unknownDiceCount(g, seat);
   const bid = g.currentBid;
 
-  // A valid Check (5 dice forming a pattern) is a strong, safe play.
-  if (engine.canDeclareCheck(g, me) && rnd() < 0.7) return { type: 'check' };
+  // Check. The bot may look at its OWN hand (not hidden info) to decide:
+  //  - a REAL Check hand is a strong, safe play (if challenged, the challenger loses)
+  //  - otherwise it is a BLUFF — used only occasionally, a little more when raising
+  //    looks dangerous (bid already high), because a Check just passes the turn.
+  if (engine.canDeclareCheck(g, me)) {
+    if (engine.isValidCheck(dice)) {
+      if (rnd() < 0.72) return { type: 'check' };
+    } else {
+      const totalDice = me.diceCount + unknown;
+      const highBid = !!bid && bid.quantity >= Math.ceil(totalDice * 0.55);
+      const bluffP = highBid ? 0.15 : 0.05;
+      if (rnd() < bluffP) return { type: 'check' };
+    }
+  }
 
   if (!bid) return openingBid(dice, unknown);
 

@@ -55,8 +55,13 @@
         <li><strong>1s are wildcards</strong> in normal rounds &mdash; unless the bid itself is on 1s.</li>
         <li>Switching to a bid on 1s: quantity must be &gt; half the previous quantity
             (<code>floor(prev/2)+1</code>). Switching back from 1s: double the quantity.</li>
-        <li><strong>Check</strong>: only with exactly 5 dice forming Five of a Kind,
-            All Different, or Full House. It skips your turn; the bid stays.</li>
+        <li><strong>Check</strong>: declare with exactly 5 dice and an active bid &mdash;
+            you may <em>bluff</em> (no real pattern needed) and you may Check right after
+            someone else Checked. It skips your turn; the numerical bid stays.
+            A Dodo challenges only the <em>most recent</em> Check: that player's dice are
+            shown &mdash; a real Five of a Kind / All Different / Full House means the
+            challenger loses a die, otherwise the checker does.
+            <em>Once per player per round.</em></li>
         <li><strong>Blind Round</strong>: when a player drops to exactly 1 die.
             Nobody sees any dice; the lone die sets a secret target; bids are quantity only;
             1s are <em>not</em> wild.</li>
@@ -99,14 +104,16 @@
 
           <div id="seats" class="seats"></div>
 
-          <div class="table-center">
+          <div class="table-center" id="tableCenter">
             <div class="bid-card">
               <div class="bid-label">Current Bid</div>
               <div id="bidValue" class="bid-value">&mdash;</div>
               <div id="bidMeta" class="bid-meta"></div>
-              <div id="hiddenTarget" class="hidden-target hidden">Hidden Target: <span>?</span></div>
             </div>
           </div>
+
+          <!-- round-reveal / result panel, shown on the table during the reveal flow -->
+          <div id="revealBanner" class="reveal-banner hidden" aria-live="polite"></div>
         </div>
       </div>
 

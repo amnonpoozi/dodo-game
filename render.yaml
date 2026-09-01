@@ -1,0 +1,21 @@
+# Render Blueprint — one web service that serves BOTH the API (Socket.IO) and the
+# static frontend on a single port. No database, no build step, no extra services.
+#
+# Deploy: push this repo to GitHub, then in Render pick "New +" -> "Blueprint" and
+# point it at the repo. Or create a Web Service manually with:
+#   Build command:  npm ci
+#   Start command:  npm start
+#   Health check:   /health
+services:
+  - type: web
+    name: dodo-online
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # PORT is injected by Render automatically — the server reads process.env.PORT.

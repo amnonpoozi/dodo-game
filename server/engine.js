@@ -119,13 +119,17 @@ function describeCheck(hand) {
 }
 function isValidCheck(hand) { return describeCheck(hand) !== null; }
 
+// Eligibility to DECLARE Check. It does NOT look at the player's hand (Check may be
+// a bluff) and does NOT care what the previous player did — consecutive Checks are
+// legal. Whether a Check was truthful is only tested if someone challenges it with
+// Dodo (see resolveCheckChallenge), and that challenge always targets the MOST
+// RECENT checker via g.checkerIndex, which applyCheck overwrites every time.
 function canDeclareCheck(g, player) {
   return g.roundType === 'normal'
     && player.diceCount === MAX_DICE
     && g.currentBid !== null
-    && !g.lastActionWasCheck
     && !player.eliminated
-    && isValidCheck(player.dice);
+    && !player.usedCheck;           // one Check per player per round (reset in startRound)
 }
 
 
@@ -191,6 +195,9 @@ function startRound(g) {
   g.reveal = null;
   g.roundNo = (g.roundNo || 0) + 1;
 
+  // Every player is eligible for their one Check again this round.
+  for (const p of g.players) p.usedCheck = false;
+
   if (g.roundType === 'blind') {
     g.history.push('— Blind Round started —');
     g.history.push(nameOf(g, starter) + ' starts (down to 1 die). Nobody can see their dice.');
@@ -227,7 +234,8 @@ function applyBid(g, seat, bid) {
 
 function applyCheck(g, seat) {
   g.lastActionWasCheck = true;
-  g.checkerIndex = seat;
+  g.checkerIndex = seat;                 // the LATEST checker — a Dodo challenge targets only this one
+  g.players[seat].usedCheck = true;      // spent this round's Check for this player
   g.history.push(nameOf(g, seat) + ' said Check');
   advanceTurn(g);
 }
