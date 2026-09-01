@@ -64,7 +64,11 @@
             <em>Once per player per round.</em></li>
         <li><strong>Blind Round</strong>: when a player drops to exactly 1 die.
             Nobody sees any dice; the lone die sets a secret target; bids are quantity only;
-            1s are <em>not</em> wild.</li>
+            1s are <em>not</em> wild &mdash; unless <em>every</em> remaining player is down to a
+            single die, in which case 1s count as wild again (except when the hidden target is 1).
+            <strong>Believe</strong> is disabled for the whole Blind Round.</li>
+        <li><strong>Believe</strong> also switches off once fewer than half the starting dice
+            remain in play (exactly half still counts).</li>
       </ul>
     </details>
   </section>
@@ -78,6 +82,18 @@
 
       <div id="playerCount" class="player-count">Players: 0 / 6</div>
       <ul id="playerList" class="player-list"></ul>
+
+      <div class="timer-setting">
+        <label>Turn timer</label>
+        <div class="player-choice timer-choice" id="timerChoice">
+          <button type="button" data-sec="0">No limit</button>
+          <button type="button" data-sec="15">15s</button>
+          <button type="button" data-sec="30">30s</button>
+          <button type="button" data-sec="45">45s</button>
+          <button type="button" data-sec="60">60s</button>
+        </div>
+        <div id="timerReadout" class="hint">Turn Timer: No Time Limit</div>
+      </div>
 
       <button id="startBtn" class="primary big hidden">Start Game</button>
       <p id="roomWait" class="hint hidden">Waiting for the host to start the game…</p>
@@ -106,7 +122,8 @@
 
           <div class="table-center" id="tableCenter">
             <div class="bid-card">
-              <div class="bid-label">Current Bid</div>
+              <div id="bidLabel" class="bid-label">Current Bid</div>
+              <div id="bidBlindFlag" class="blind-flag hidden">BLIND</div>
               <div id="bidValue" class="bid-value">&mdash;</div>
               <div id="bidMeta" class="bid-meta"></div>
             </div>
@@ -120,6 +137,7 @@
       <!-- side panel -->
       <aside class="side">
         <div class="turn-line" id="turnLine">Your turn</div>
+        <div id="turnTimerBar" class="turn-timer hidden"></div>
 
         <div class="controls" id="controls">
           <div class="row qty-row">

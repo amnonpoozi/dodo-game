@@ -67,9 +67,13 @@ const NEXT_MS           = 680;
 let clientPhase = ANIM.PLAYING;
 let animToken = 0;                 // bumping this cancels any in-flight sequence
 let diceChangeApplied = false;     // has the loss/gain been folded into the counts yet
-let revealDone = false;            // local reveal sequence finished -> allow "Start Next Round"
+let revealDone = false;            // local reveal sequence finished -> round auto-advances
 let prevPhase = null;
 let nextRetryTimer = null;
+
+// turn timer (online rooms): the server owns the real deadline; this is a local
+// estimate purely for the visible countdown.
+let timerDeadline = null;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function inRevealAnim() {
@@ -152,12 +156,32 @@ socket.on('connect_error', () => setConn(false));
 
 socket.on('errorMsg', (m) => flash(m));
 
+// The host removed this player from the room — drop straight back to the lobby.
+socket.on('kicked', (info) => {
+  clearTimeout(nextRetryTimer);
+  animToken++;
+  clientPhase = ANIM.PLAYING;
+  clearRoom();
+  view = null;
+  timerDeadline = null;
+  show('lobby');
+  flash((info && info.message) || 'You were removed from the room by the host.');
+});
+
 socket.on('state', (v) => {
   const from = prevPhase;
   view = v;
 
+  // local countdown estimate for the turn timer (visual only)
+  if (v.turnTimerSec > 0 && v.turnMsLeft != null && v.phase === 'playing') {
+    timerDeadline = Date.now() + v.turnMsLeft;
+  } else {
+    timerDeadline = null;
+  }
+
   if (v.phase === 'lobby') {
     animToken++;                       // cancel anything running
+    clearTimeout(nextRetryTimer);
     clientPhase = ANIM.PLAYING;
     diceChangeApplied = false;
     revealDone = false;
@@ -220,8 +244,15 @@ async function runRevealSequence() {
   }
 
   revealDone = true;
-  clientPhase = ANIM.SHOWING_RESULT;   // hold on the result; "Start Next Round" now available
+  clientPhase = ANIM.SHOWING_RESULT;   // hold on the result briefly, then auto-advance
   render();
+
+  // Change 5: no manual "Start Next Round" button. Once the result has been on
+  // screen for a beat, ask the server to advance. The server still enforces the
+  // shared minimum reveal window and ignores anything premature, so keep nudging
+  // until it takes (emitNextRound retries while we are still in the reveal).
+  await sleep(REVEAL_RESULT_MS);   if (!live()) return;
+  emitNextRound();
 }
 
 async function runNextRoundSequence() {
@@ -247,30 +278,35 @@ async function quickStartSequence() {
   clientPhase = ANIM.PLAYING; render();
 }
 
+// Ask the server to start the next round, and keep asking (the server holds every
+// client on the reveal for the same minimum window and silently drops early
+// requests) until we actually leave the reveal phase.
 function emitNextRound() {
-  socket.emit('nextRound');
   clearTimeout(nextRetryTimer);
-  nextRetryTimer = setTimeout(() => {
-    if (view && view.phase === 'reveal' && revealDone) {
-      const b = $('nextRoundBtn');
-      if (b) b.disabled = false;               // server held us on the 3s window — allow a retry
-    }
-  }, 1600);
+  const tick = () => {
+    if (!view || view.phase !== 'reveal') { clearTimeout(nextRetryTimer); return; }
+    socket.emit('nextRound');
+    nextRetryTimer = setTimeout(tick, 1200);
+  };
+  tick();
 }
 
 /* ----- reveal helpers ----- */
 function revealReason(r) {
+  if (r.kind === 'timeout') return 'Ran out of time';
   if (r.kind === 'check')   return r.checkValid ? 'Check was valid' : 'Check was invalid';
   if (r.kind === 'dodo')    return r.bidWasTrue ? 'Dodo was wrong' : 'Dodo was correct';
   return r.success ? 'Believe was exact' : 'Believe was incorrect';
 }
 function revealWinnerId(r) {
+  if (r.kind === 'timeout') return null;               // nobody "wins" a timeout
   if (r.kind === 'believe') return r.success ? (r.gainerId || r.callerId) : r.bidderId;
   const pair = r.kind === 'check' ? [r.callerId, r.checkerId] : [r.callerId, r.bidderId];
   return pair.find(id => id && id !== r.loserId) || null;
 }
 // which players' cups lift for this reveal
 function cupLiftsInReveal(r, playerId) {
+  if (r.kind === 'timeout') return playerId === r.loserId;     // only the timed-out player's dice
   if (r.kind !== 'check') return true;                 // normal + blind: everyone
   return playerId === r.checkerId || playerId === r.loserId;   // check: only the involved hands
 }
@@ -312,6 +348,11 @@ function actionBannerHTML() {
     who = esc(nameById(view.checkerId)) + ' declared Check';
     const b = view.currentBid;
     qty = b ? b.quantity : null; face = b ? b.face : null; blind = blindNow;
+  } else if (r.kind === 'timeout') {
+    title = 'TIME UP';
+    who = esc(nameById(r.loserId || r.timedOutSeat)) + ' ran out of time';
+    const b = r.bid || view.currentBid;
+    qty = b ? b.quantity : null; face = b ? b.face : null; blind = !!r.blind;
   } else if (r.kind === 'believe') {
     title = 'BELIEVE';
     who = esc(nameById(r.callerId)) + ' believes this bid';
@@ -330,6 +371,7 @@ function actionBannerHTML() {
   }
 
   let h = '<div class="rb-action">' + title + '</div>';
+  if (blind) h += '<div class="rb-blind">BLIND</div>';   // Change 8: unmistakable Blind marker
   if (qty != null) h += '<div class="rb-line rb-bidline">' + bidRecapHTML(qty, face, blind) + '</div>';
   h += '<div class="rb-who">' + who + '</div>';
   return h;
@@ -383,6 +425,15 @@ $('botBtn').onclick = () => {
   });
 };
 
+/* ---- turn-timer room setting (host only; see renderRoom for the display) ---- */
+(function wireTimerChoice() {
+  const box = $('timerChoice');
+  if (!box) return;
+  [...box.children].forEach(b => {
+    b.onclick = () => socket.emit('setRoomOptions', { turnTimerSec: Number(b.dataset.sec) });
+  });
+})();
+
 $('startBtn').onclick = () => socket.emit('startGame');
 
 $('leaveBtn').onclick = () => {
@@ -416,6 +467,7 @@ function render() {
 
 function renderRoom() {
   $('roomCodeText').textContent = view.code;
+  const isHost = view.youId === view.hostId;
 
   const ul = $('playerList');
   ul.innerHTML = '';
@@ -425,14 +477,39 @@ function renderRoom() {
     if (p.id === view.youId) { label += ' (you)'; li.classList.add('is-you'); }
     if (p.isHost) label += ' — host';
     if (!p.connected) { label += ' • offline'; li.classList.add('is-off'); }
-    li.textContent = label;
+
+    const span = document.createElement('span');
+    span.textContent = label;
+    li.appendChild(span);
+
+    // Change 4: only the host sees a Kick button, and never against itself.
+    if (isHost && p.id !== view.youId && p.id !== view.hostId) {
+      const kick = document.createElement('button');
+      kick.type = 'button';
+      kick.className = 'ghost kick-btn';
+      kick.textContent = 'Kick';
+      kick.onclick = () => socket.emit('kickPlayer', { targetId: p.id });
+      li.appendChild(kick);
+    }
     ul.appendChild(li);
   });
 
   const pc = $('playerCount');
   if (pc) pc.textContent = 'Players: ' + view.players.length + ' / 6';
 
-  const isHost = view.youId === view.hostId;
+  // Change 6: turn-timer room setting — everyone sees the current value; only the
+  // host can change it (before the game starts).
+  const tSec = view.turnTimerSec || 0;
+  const readout = $('timerReadout');
+  if (readout) {
+    readout.textContent = 'Turn Timer: ' + (tSec ? tSec + ' seconds' : 'No Time Limit');
+  }
+  const tChoice = $('timerChoice');
+  if (tChoice) {
+    tChoice.classList.toggle('hidden', !isHost);
+    [...tChoice.children].forEach(b => b.classList.toggle('selected', Number(b.dataset.sec) === tSec));
+  }
+
   const canStart = isHost && view.players.length >= 2 && view.players.length <= 6;
   $('startBtn').classList.toggle('hidden', !isHost);
   $('startBtn').disabled = !canStart;
@@ -461,10 +538,31 @@ function renderGame() {
   renderBid();
   renderRevealBanner();
   renderTurnLine();
+  renderTurnTimer();
   renderControls();
   renderHistory();
   renderOverlay();
 }
+
+/* ----- turn timer countdown (online rooms) ----- *
+ * Visual only. The server owns the real deadline and the timeout outcome; this
+ * just shows the shared remaining time, ticking down from the last server snapshot. */
+function renderTurnTimer() {
+  const el = $('turnTimerBar');
+  if (!el) return;
+  const active = timerDeadline != null && view && view.phase === 'playing'
+    && clientPhase === ANIM.PLAYING;
+  el.classList.toggle('hidden', !active);
+  if (!active) return;
+
+  const msLeft = Math.max(0, timerDeadline - Date.now());
+  const secs = Math.ceil(msLeft / 1000);
+  const mine = view.turnPlayerId === view.youId;
+  el.classList.toggle('urgent', msLeft <= 10000);
+  el.textContent = '⏱ ' + (mine ? 'Your turn' : nameById(view.turnPlayerId))
+    + ' — ' + secs + 's';
+}
+setInterval(() => { if (view && view.phase === 'playing') renderTurnTimer(); }, 250);
 
 /* ----- seats + dice cups ----- */
 
@@ -717,6 +815,14 @@ function renderBid() {
   const bid = view.currentBid;
   const blind = view.roundType === 'blind';
 
+  // Change 8: make a Blind Round unmistakable in the centre panel — a big "BLIND"
+  // label above the bid, shown from the very start of the round and kept for all
+  // of the blind bidding. The hidden target is never revealed here.
+  const blindFlag = $('bidBlindFlag');
+  if (blindFlag) blindFlag.classList.toggle('hidden', !blind);
+  const label = $('bidLabel');
+  if (label) label.textContent = blind ? 'Blind Round — hidden target' : 'Current Bid';
+
   // order:  [ QUANTITY ]  ×  [ visual die face ]
   //   - the number is HOW MANY
   //   - the DIE (real pips, large) is WHAT value is bid
@@ -725,9 +831,9 @@ function renderBid() {
   if (!bid) {
     const dash = document.createElement('span');
     dash.className = 'bid-empty';
-    dash.textContent = '—';
+    dash.textContent = blind ? '?' : '—';
     v.appendChild(dash);
-    meta.textContent = 'No bid yet';
+    meta.textContent = blind ? 'No bid yet — quantity only' : 'No bid yet';
     return;
   }
 
@@ -895,13 +1001,21 @@ function renderRevealBanner() {
 
   const winId = revealWinnerId(r);
   const loseId = r.loserId;
-  let h = '<div class="rb-reason">' + esc(revealReason(r)) + '</div>';
-  if (isCheck) {
+  let h = '';
+  if (r.blind) h += '<div class="rb-blind">BLIND</div>';
+  h += '<div class="rb-reason">' + esc(revealReason(r)) + '</div>';
+  if (r.kind === 'timeout') {
+    h += '<div class="rb-line">' + esc(nameById(loseId)) + ' ran out of time and lost one die</div>';
+  } else if (isCheck) {
     h += '<div class="rb-line">' + esc(nameById(r.checkerId)) + '&rsquo;s hand: <strong>' + esc(r.checkPattern || 'no pattern') + '</strong></div>';
   } else {
     h += '<div class="rb-line rb-bidline">Bid ' + bidHtml + ' &nbsp;&middot;&nbsp; counted <strong>' + r.actual + '</strong></div>';
-    if (r.blind) h += '<div class="rb-line rb-target">Hidden target was <strong>' + r.face + '</strong> (1s are not wild)</div>';
-    else h += '<div class="rb-line">' + (r.wild ? '1s counted as wildcards' : '1s did not count &mdash; the bid is on 1s') + '</div>';
+    if (r.blind) {
+      h += '<div class="rb-line rb-target">Hidden target was <strong>' + r.face + '</strong> &mdash; '
+        + (r.wild ? '1s counted as wild (everyone on one die)' : '1s are not wild') + '</div>';
+    } else {
+      h += '<div class="rb-line">' + (r.wild ? '1s counted as wildcards' : '1s did not count &mdash; the bid is on 1s') + '</div>';
+    }
   }
 
   if (winId) h += '<span class="rb-win">&#9650; ' + esc(nameById(winId)) + '</span>';
@@ -911,13 +1025,11 @@ function renderRevealBanner() {
 
   h += '<div class="rb-next-line">' + esc(nameById(r.nextStarterId)) + ' starts next'
     + (r.pendingBlind ? ' &mdash; <strong>BLIND ROUND</strong>' : '') + '</div>';
-  if (revealDone) h += '<button id="nextRoundBtn" class="primary big" type="button">Start Next Round</button>';
+  if (revealDone) h += '<div class="rb-next-auto">Next round starting&hellip;</div>';
 
   el.innerHTML = h;
   el.classList.add('as-result');
   el.classList.remove('as-action');
-  const btn = $('nextRoundBtn');
-  if (btn) btn.onclick = () => { btn.disabled = true; emitNextRound(); };
 }
 
 function showWinner() {

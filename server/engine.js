@@ -166,16 +166,40 @@ function firstActiveFromInclusive(g, from) {
   return from;
 }
 
-// Normal round: 1s wild unless the bid is on 1s. Blind round: never wild.
+// Normal round: 1s wild unless the bid is on 1s.
+// Blind round: 1s are NOT wild — EXCEPT the special case where every active
+// player is down to exactly one die, in which case 1s become wild again for
+// non-1 targets (a target of 1 still counts only actual 1s, handled by
+// countMatchingDice's own `face !== 1` guard).
 function wildcardsFor(g, face) {
-  if (g.roundType === 'blind') return false;
+  if (g.roundType === 'blind') {
+    const act = activePlayers(g);
+    const everyoneOnOne = act.length > 0 && act.every(p => p.diceCount === 1);
+    return everyoneOnOne ? face !== 1 : false;
+  }
   return face !== 1;
+}
+
+// May the Believe action be used right now?  This is IN ADDITION to every other
+// Believe restriction the caller already enforces.
+//   - Never during a Blind Round.
+//   - Only while at least half of the starting dice are still in play
+//     (exactly half is allowed). `g.initialTotalDice` is captured on the first
+//     startRound() call, when every player still holds a full cup.
+function canBelieveNow(g) {
+  if (g.roundType === 'blind') return false;
+  const initial = g.initialTotalDice || totalDiceInPlay(g);
+  return totalDiceInPlay(g) >= initial / 2;
 }
 
 
 /* ---------- round flow ---------- */
 
 function startRound(g) {
+  // Captured once, on the opening round, when every active player holds a full
+  // cup — i.e. numberOfPlayers * START_DICE. Drives the Believe half-dice rule.
+  if (g.initialTotalDice == null) g.initialTotalDice = totalDiceInPlay(g);
+
   g.roundType = g.pendingBlind ? 'blind' : 'normal';
   g.pendingBlind = false;
 
@@ -346,6 +370,31 @@ function resolveBelieve(g, callerSeat) {
   };
 }
 
+// Turn-timer expiry (online rooms with a turn timer). The player on the clock is
+// treated exactly like the die-loser of a resolved round: they lose one die, a
+// Blind Round may arm, and they start the next round if still active.
+function resolveTimeout(g, seat) {
+  const res = loseDie(g, seat);
+  maybeArmBlind(g, res);
+  g.nextStarterIndex = determineNextStarter(g, { loserSeat: seat });
+
+  g.history.push(nameOf(g, seat) + ' ran out of time and lost one die' +
+    (res.eliminated ? ' — eliminated' : ''));
+
+  g.reveal = {
+    kind: 'timeout',
+    blind: g.roundType === 'blind',
+    face: null,
+    wild: false,
+    bid: g.currentBid ? { quantity: g.currentBid.quantity, face: g.currentBid.face } : null,
+    actual: null,
+    timedOut: true,
+    timedOutSeat: seat,
+    loserSeat: seat,
+    gainerSeat: null,
+  };
+}
+
 function resolveCheckChallenge(g, callerSeat) {
   const checkerSeat = g.checkerIndex;
   const pattern = describeCheck(g.players[checkerSeat].dice);
@@ -371,8 +420,9 @@ module.exports = {
   START_DICE, MAX_DICE,
   getMinimumOnesBid, getMinimumNormalBidFromOnes,
   isValidBid, countMatchingDice, describeCheck, isValidCheck, canDeclareCheck,
+  canBelieveNow, wildcardsFor,
   activePlayers, totalDiceInPlay,
   startRound, advanceTurn, applyBid, applyCheck,
-  resolveDodo, resolveBelieve, resolveCheckChallenge,
+  resolveDodo, resolveBelieve, resolveCheckChallenge, resolveTimeout,
   determineNextStarter,
 };

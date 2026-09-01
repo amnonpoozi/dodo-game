@@ -119,8 +119,11 @@ function chooseNormal(g, seat) {
   const expected = mine + unknown * pMatch;
   const gap = bid.quantity - expected;                   // how far the bid overreaches
 
-  // Believe means EXACTLY right — only when the bid sits on the expectation and is small.
-  if (Math.abs(gap) < 0.6 && bid.quantity <= Math.max(2, Math.ceil(unknown / 3)) && rnd() < 0.15) {
+  // Believe means EXACTLY right — only when the bid sits on the expectation and is
+  // small. Also barred during a Blind Round and once fewer than half the starting
+  // dice remain (engine.canBelieveNow) — the bot must not attempt it then.
+  if (engine.canBelieveNow(g) &&
+      Math.abs(gap) < 0.6 && bid.quantity <= Math.max(2, Math.ceil(unknown / 3)) && rnd() < 0.15) {
     return { type: 'believe' };
   }
 
@@ -155,8 +158,7 @@ function chooseBlind(g, seat) {
   if (bid.quantity <= 1) pDodo = 0;
   if (rnd() < pDodo) return { type: 'dodo' };
 
-  if (Math.abs(gap) < 0.5 && rnd() < 0.1) return { type: 'believe' };
-
+  // Believe is never available in a Blind Round — the bot just raises or dodos.
   return { type: 'bid', quantity: bid.quantity + 1 };
 }
 

@@ -238,6 +238,55 @@ function testCheckBluff() {
   assert(g2.players[1].diceCount === beforeTrue - 1, 'truthful check: Dodo caller loses exactly one die');
 }
 
+/* ---- focused unit test: Believe half-dice rule + Blind Round wildcard exception ---- */
+function testBelieveAndBlindWildcards() {
+  // --- Change 1: Believe only while >= half the STARTING dice remain (exactly half OK) ---
+  const g2 = makeGame(2);                       // initialTotalDice = 10, half = 5
+  assert(g2.initialTotalDice === 10, 'believe-threshold: initialTotalDice captured (2p => 10)');
+  g2.roundType = 'normal';
+  g2.players[0].diceCount = 3; g2.players[1].diceCount = 2;   // 5 remain
+  assert(engine.canBelieveNow(g2) === true, 'believe-threshold: 5/10 remaining => Believe allowed (exactly half)');
+  g2.players[0].diceCount = 2; g2.players[1].diceCount = 2;   // 4 remain
+  assert(engine.canBelieveNow(g2) === false, 'believe-threshold: 4/10 remaining => Believe NOT allowed');
+
+  const g3 = makeGame(3);                       // initialTotalDice = 15, half = 7.5
+  g3.roundType = 'normal';
+  g3.players[0].diceCount = 3; g3.players[1].diceCount = 3; g3.players[2].diceCount = 2; // 8
+  assert(engine.canBelieveNow(g3) === true, 'believe-threshold: 8/15 remaining => Believe allowed');
+  g3.players[0].diceCount = 3; g3.players[1].diceCount = 2; g3.players[2].diceCount = 2; // 7
+  assert(engine.canBelieveNow(g3) === false, 'believe-threshold: 7/15 remaining => Believe NOT allowed');
+
+  // --- Change 2: never during a Blind Round, regardless of dice count ---
+  g3.players[0].diceCount = 5; g3.players[1].diceCount = 5; g3.players[2].diceCount = 5; // 15, full
+  g3.roundType = 'blind';
+  assert(engine.canBelieveNow(g3) === false, 'believe-blind: Believe is unavailable during a Blind Round even at full dice');
+
+  // --- Change 3: Blind Round wildcard exception ---
+  // Case A — NOT everyone on one die: 1s are NOT wild.
+  const a = makeGame(2);
+  a.roundType = 'blind';
+  a.players[0].diceCount = 1; a.players[1].diceCount = 2;
+  assert(engine.wildcardsFor(a, 5) === false, 'blind-wild A: mixed dice counts => 1s not wild');
+  assert(engine.countMatchingDice([5, 1, 5], 5, engine.wildcardsFor(a, 5)) === 2,
+    'blind-wild A: target 5 over [5],[1,5] counts 2 (the 1 does NOT count)');
+
+  // Case B — EVERY active player on exactly one die: 1s ARE wild for a non-1 target.
+  const b = makeGame(2);
+  b.roundType = 'blind';
+  b.players[0].diceCount = 1; b.players[1].diceCount = 1;
+  assert(engine.wildcardsFor(b, 5) === true, 'blind-wild B: everyone on one die => 1s wild for target 5');
+  assert(engine.countMatchingDice([5, 1], 5, engine.wildcardsFor(b, 5)) === 2,
+    'blind-wild B: target 5 over [5],[1] counts 2 (the 1 IS wild)');
+
+  // Case C — everyone on one die but the hidden target IS 1: only actual 1s count.
+  const c = makeGame(2);
+  c.roundType = 'blind';
+  c.players[0].diceCount = 1; c.players[1].diceCount = 1;
+  assert(engine.wildcardsFor(c, 1) === false, 'blind-wild C: target 1 => never "wild" (only actual 1s)');
+  assert(engine.countMatchingDice([1, 5], 1, engine.wildcardsFor(c, 1)) === 1,
+    'blind-wild C: target 1 over [1],[5] counts 1 (no double-count)');
+}
+
 function playGame(seedInfo, stats) {
   const state = {
     g: makeGame(6),
@@ -339,6 +388,9 @@ console.log(failures > bluffFailBefore ? '  check-bluff unit test: FAILED' : '  
 const consecFailBefore = failures;
 testConsecutiveCheck();
 console.log(failures > consecFailBefore ? '  consecutive-check unit test: FAILED' : '  consecutive-check unit test: ok');
+const believeFailBefore = failures;
+testBelieveAndBlindWildcards();
+console.log(failures > believeFailBefore ? '  believe-threshold / blind-wildcard unit test: FAILED' : '  believe-threshold / blind-wildcard unit test: ok');
 
 const N = Number(process.argv[2]) || 300;
 console.log('Playing ' + N + ' six-player all-bot games…\n');

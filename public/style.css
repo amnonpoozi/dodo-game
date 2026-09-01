@@ -547,6 +547,18 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font-size: 11px;
   color: #7a5a24;
 }
+
+/* Change 8 — BLIND round made unmistakable in the centre panel */
+.bid-card .blind-flag {
+  font-size: 34px;
+  font-weight: bold;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #7a1f16;
+  line-height: 1;
+  margin: 6px 0 2px;
+  animation: badgePulse 1.6s ease-in-out infinite;
+}
 /* Current Bid:  [ die face ]  ×  [ quantity ]
    die = WHAT value is bid (large, real pips) · number = HOW MANY */
 .bid-value {
@@ -595,6 +607,25 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   letter-spacing: 0.06em;
   color: var(--gold);
   margin-bottom: 14px;
+}
+
+/* Change 6 — turn-timer countdown (online rooms) */
+.turn-timer {
+  margin: -4px 0 14px;
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--parch-2);
+  background: linear-gradient(180deg, #35240f, #1e1408);
+  border: 1px solid var(--wood-2);
+  border-radius: 10px;
+  padding: 7px 12px;
+}
+.turn-timer.urgent {
+  color: #ffd9d0;
+  border-color: #a5493f;
+  background: linear-gradient(180deg, #4a1414, #2a0b0b);
+  animation: badgePulse 1s ease-in-out infinite;
 }
 
 .controls {
@@ -845,7 +876,19 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .reveal-banner .rb-win  { background: rgba(111, 191, 115, 0.28); color: #1f4a2b; border: 1px solid var(--ok); }
 .reveal-banner .rb-lose { background: rgba(178, 58, 46, 0.24); color: #6a1a12; border: 1px solid var(--danger); }
 .reveal-banner .rb-next-line { font-size: 12px; color: #6a4d20; margin-top: 8px; }
-.reveal-banner #nextRoundBtn { margin-top: 12px; }
+/* Change 5 — the round advances automatically; this replaces the old button */
+.reveal-banner .rb-next-auto { margin-top: 10px; font-size: 12px; font-style: italic; color: #7a5a34; }
+
+/* Change 8 — big BLIND marker inside the action / result banner */
+.reveal-banner .rb-blind {
+  font-size: clamp(18px, 5vw, 26px);
+  font-weight: bold;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: #7a1f16;
+  margin: 0 0 6px;
+}
+.reveal-banner.as-action .rb-blind { margin: 4px 0 8px; }
 
 /* a die leaving a player's group (loss) */
 .cup-dice .die.die-leaving {
@@ -887,6 +930,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     border-radius: 16px;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 16px;
     padding: 18px 8px;
   }
@@ -904,27 +948,35 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     transform: translateX(-50%) translateY(-58px) rotate(-7deg);
   }
 
-  #seats {
-    order: 2;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 16px;
-  }
-  #seats .seat { order: 1; }
-  #seats .pos-bottom { order: 2; }          /* keep your own cup last / nearest you */
+  /* Change 7 (mobile/tablet only) — put the Current Bid panel BETWEEN the players.
+     #seats stops being its own box (display:contents) so every .seat and the
+     centre bid / reveal panel are siblings in one vertical stack on the felt:
+     opponents (order 2) -> Current Bid / reveal (order 3) -> your own cup
+     (order 4). Desktop layout is untouched — this is all inside the 640px query. */
+  #seats { display: contents; }
 
   .table-felt .seat {
     position: static;
     transform: none;
     width: auto;
     min-width: 140px;
+    order: 2;                               /* opponents, above the bid */
   }
-  .table-center { order: 1; position: static; transform: none; align-self: center; }
+  .table-felt .seat.pos-bottom { order: 4; }  /* your own cup, nearest you, below the bid */
+
+  .table-center {
+    order: 3;
+    position: static;
+    transform: none;
+    align-self: center;
+    width: 100%;
+    max-width: 340px;
+  }
   .reveal-banner {
-    order: 0; position: static; transform: none;
-    width: 100%; max-width: 360px; align-self: center; margin: 4px auto;
+    order: 3; position: static; transform: none;
+    width: 100%; max-width: 360px; align-self: center; margin: 0 auto;
   }
+  .table-center .bid-card { min-width: 0; }
   @keyframes bannerIn { from { opacity: 0; } to { opacity: 1; } }
 
   .die { width: 34px; height: 34px; padding: 4px; }
@@ -1033,6 +1085,16 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 .player-list li.is-you { border-color: var(--gold-deep); color: var(--gold); }
 .player-list li.is-off { opacity: 0.5; font-style: italic; }
+/* Change 4 — host-only Kick button sits at the right of each player row */
+.player-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kick-btn { padding: 4px 12px; font-size: 12px; flex-shrink: 0; }
+
+/* Change 6 — turn-timer room setting in the lobby */
+.timer-setting { margin: 10px 0 6px; text-align: center; }
+.timer-setting > label { text-align: center; }
+.timer-choice { flex-wrap: wrap; }
+.timer-choice button { padding: 9px 6px; font-size: 13px; }
+#timerReadout { margin: 8px 0 0; }
 
 #roomWait { margin-top: 10px; }
 #leaveBtn { margin-top: 12px; }

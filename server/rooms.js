@@ -54,6 +54,10 @@ function create(hostPlayer, opts) {
     emptySince: null,
     autoTimer: null,   // "player is away" auto-move timer
     botTimer: null,    // pending scheduled bot move (solo rooms only)
+    turnTimerSec: 0,   // online-room turn timer, seconds (0 = no limit); host-set in the lobby
+    turnTimer: null,   // pending turn-timeout timer for the player on the clock
+    turnDeadline: null,// epoch ms the current turn expires at (null = no timer running)
+    revealTimer: null, // safety timer that auto-advances a stuck reveal
   };
   rooms.set(code, room);
   return room;
@@ -68,6 +72,8 @@ function destroy(room) {
   if (!room) return;
   if (room.autoTimer) clearTimeout(room.autoTimer);
   if (room.botTimer) clearTimeout(room.botTimer);
+  if (room.turnTimer) clearTimeout(room.turnTimer);
+  if (room.revealTimer) clearTimeout(room.revealTimer);
   rooms.delete(room.code);
 }
 

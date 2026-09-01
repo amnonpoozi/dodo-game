@@ -46,6 +46,16 @@ const BOT_NAMES = [
 const REVEAL_MIN_OVERRIDE = Number(process.env.DODO_REVEAL_MIN_MS);
 const REVEAL_MIN_MS = Number.isFinite(REVEAL_MIN_OVERRIDE) ? REVEAL_MIN_OVERRIDE : 3000;
 
+// The round now advances automatically (no manual "Start Next Round" button). A
+// client emits `nextRound` when its reveal animation finishes; this server-side
+// safety timer covers the case where no client ever does (everyone mid-animation,
+// disconnected, or a solo game left idle). Generously longer than the client
+// reveal sequence so it normally never fires.
+const REVEAL_AUTO_PAD_MS = Number.isFinite(REVEAL_MIN_OVERRIDE) ? 800 : 9000;
+
+// Allowed turn-timer lengths for an online room (seconds). 0 = no limit.
+const TURN_TIMER_CHOICES = new Set([0, 15, 30, 45, 60]);
+
 // The player-cup images live in the project root; expose exactly those six files.
 const CUP_FILES = new Set(['red.png', 'blue.png', 'green.png', 'yellow.png', 'purple.png', 'orange.png']);
 
@@ -98,6 +108,8 @@ function buildView(room, pid) {
     phase: room.phase,
     hostId: room.hostId,
     youId: pid,
+    solo: !!room.solo,
+    turnTimerSec: room.turnTimerSec || 0,
     players: room.players.map(p => ({
       id: p.id,
       name: p.name,
@@ -136,11 +148,21 @@ function buildView(room, pid) {
     v.legalActions = {
       canBid: true,
       canDodo: !!g.currentBid,
-      canBelieve: !!g.currentBid,
+      // Believe: needs a bid, AND is barred during a Blind Round, AND only while
+      // at least half the starting dice remain in play (engine.canBelieveNow).
+      canBelieve: !!g.currentBid && engine.canBelieveNow(g),
       canCheck: engine.canDeclareCheck(g, me),
     };
   } else {
     v.legalActions = null;
+  }
+
+  // --- turn timer (online rooms only) — visual countdown data; the SERVER owns
+  //     the real deadline and the timeout outcome. ---
+  if (room.phase === 'playing' && room.turnTimerSec > 0 && room.turnDeadline) {
+    v.turnMsLeft = Math.max(0, room.turnDeadline - Date.now());
+  } else {
+    v.turnMsLeft = null;
   }
 
   // --- reveal: the round is over, so every hand + the target may be shown ---
@@ -155,6 +177,7 @@ function buildView(room, pid) {
       actual: r.actual,
       bidWasTrue: r.bidWasTrue,
       success: r.success,
+      timedOut: !!r.timedOut,
       checkPattern: r.checkPattern,
       checkValid: r.checkValid,
       checkerId: r.checkerSeat != null ? seatToId(room, r.checkerSeat) : null,
@@ -182,13 +205,16 @@ function buildView(room, pid) {
 
 function broadcastState(room) {
   if (!room) return;
+  // Arm the server-side timers FIRST so the view each client receives already
+  // carries a fresh turn deadline (turnMsLeft) for the countdown.
+  armAutoPlay(room);
+  scheduleBotMove(room);
+  armTurnTimer(room);
   for (const p of room.players) {
     if (p.connected && p.socketId) {
       io.to(p.socketId).emit('state', buildView(room, p.id));
     }
   }
-  armAutoPlay(room);
-  scheduleBotMove(room);
 }
 
 
@@ -225,6 +251,70 @@ function beginGame(room) {
 function enterReveal(room) {
   room.phase = 'reveal';
   room.revealAt = Date.now();
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+  room.turnDeadline = null;
+  scheduleRevealAutoAdvance(room);
+}
+
+// The round advances with NO manual confirmation. Normally a client asks for it
+// (see the `nextRound` handler) once its reveal animation finishes; this is the
+// fallback if none does.
+function scheduleRevealAutoAdvance(room) {
+  if (room.revealTimer) { clearTimeout(room.revealTimer); room.revealTimer = null; }
+  if (room.phase !== 'reveal') return;
+  const elapsed = Date.now() - (room.revealAt || Date.now());
+  const wait = Math.max(0, REVEAL_MIN_MS - elapsed) + REVEAL_AUTO_PAD_MS;
+  room.revealTimer = setTimeout(() => {
+    room.revealTimer = null;
+    advanceRound(room);
+  }, wait);
+}
+
+// Shared by the client-driven `nextRound` and the safety timer. Idempotent: the
+// phase check stops a double advance.
+function advanceRound(room) {
+  if (!room || room.phase !== 'reveal' || !room.game) return;
+  if (room.revealTimer) { clearTimeout(room.revealTimer); room.revealTimer = null; }
+  const g = room.game;
+  const alive = engine.activePlayers(g);
+  if (alive.length <= 1) {
+    room.phase = 'gameover';
+  } else {
+    engine.startRound(g);
+    room.phase = 'playing';
+  }
+  g.reveal = null;
+  broadcastState(room);
+}
+
+/* ---------------- turn timer (online rooms) ---------------- *
+ * When an online room has a turn timer and it is a connected human's turn, the
+ * server counts down. On zero the player loses one die and is treated as the
+ * round's die-loser (engine.resolveTimeout), then the round auto-advances. The
+ * client countdown is purely visual — this timer is the authority.            */
+
+function armTurnTimer(room) {
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+  room.turnDeadline = null;
+  if (room.phase !== 'playing' || !room.game) return;
+  if (room.solo) return;                         // online rooms only
+  const sec = room.turnTimerSec || 0;
+  if (sec <= 0) return;
+
+  const cur = room.game.players[room.game.turnIndex];
+  if (!cur || cur.eliminated || cur.isBot) return;
+
+  room.turnDeadline = Date.now() + sec * 1000;
+  room.turnTimer = setTimeout(() => {
+    room.turnTimer = null;
+    if (room.phase !== 'playing' || !room.game) return;
+    const g = room.game;
+    const p = g.players[g.turnIndex];
+    if (!p || p.eliminated || p.isBot) { armTurnTimer(room); return; }
+    engine.resolveTimeout(g, p.seat);
+    enterReveal(room);
+    broadcastState(room);
+  }, sec * 1000);
 }
 
 
@@ -276,7 +366,7 @@ function applyBotAction(room, seat, action) {
     return;
   }
 
-  if (type === 'believe' && g.currentBid) {
+  if (type === 'believe' && g.currentBid && engine.canBelieveNow(g)) {
     engine.resolveBelieve(g, seat);
     enterReveal(room);
     return;
@@ -475,6 +565,63 @@ io.on('connection', (socket) => {
     socket.data.playerId = null;
   });
 
+  // ---- lobby: host sets the optional turn timer ----
+  socket.on('setRoomOptions', (payload, cb) => {
+    const room = roomOf();
+    if (!room) { if (typeof cb === 'function') cb({ ok: false, error: 'No room.' }); return; }
+    if (socket.data.playerId !== room.hostId) {
+      if (typeof cb === 'function') cb({ ok: false, error: 'Only the host can change room settings.' });
+      return socket.emit('errorMsg', 'Only the host can change room settings.');
+    }
+    if (room.phase !== 'lobby') {
+      if (typeof cb === 'function') cb({ ok: false, error: 'Settings are locked once the game starts.' });
+      return;
+    }
+    if (room.solo) { if (typeof cb === 'function') cb({ ok: false, error: 'Not available in a bot game.' }); return; }
+
+    let sec = toInt(payload && payload.turnTimerSec);
+    if (!TURN_TIMER_CHOICES.has(sec)) sec = 0;
+    room.turnTimerSec = sec;
+    if (typeof cb === 'function') cb({ ok: true, turnTimerSec: sec });
+    broadcastState(room);
+  });
+
+  // ---- lobby: host removes another player ----
+  socket.on('kickPlayer', (payload, cb) => {
+    const room = roomOf();
+    if (!room) { if (typeof cb === 'function') cb({ ok: false, error: 'No room.' }); return; }
+    // trust only the server's own record of who the host is
+    if (socket.data.playerId !== room.hostId) {
+      if (typeof cb === 'function') cb({ ok: false, error: 'Only the host can remove players.' });
+      return socket.emit('errorMsg', 'Only the host can remove players.');
+    }
+    if (room.phase !== 'lobby') {
+      if (typeof cb === 'function') cb({ ok: false, error: 'You can only remove players in the lobby.' });
+      return socket.emit('errorMsg', 'You can only remove players in the lobby.');
+    }
+    const targetId = payload && payload.targetId;
+    if (!targetId || targetId === room.hostId) {
+      if (typeof cb === 'function') cb({ ok: false, error: 'Invalid player.' });
+      return;
+    }
+    const target = room.players.find(p => p.id === targetId);
+    if (!target) { if (typeof cb === 'function') cb({ ok: false, error: 'That player is not in the room.' }); return; }
+
+    room.players = room.players.filter(p => p.id !== targetId);
+    room.players.forEach((p, i) => { p.seat = i; });
+    if (room.game) room.game.players = room.players;
+
+    const tsock = target.socketId && io.sockets.sockets.get(target.socketId);
+    if (tsock) {
+      tsock.emit('kicked', { message: 'You were removed from the room by the host.' });
+      tsock.leave(room.code);
+      tsock.data.roomCode = null;
+      tsock.data.playerId = null;
+    }
+    if (typeof cb === 'function') cb({ ok: true });
+    broadcastState(room);
+  });
+
   // ---- game control ----
 
   socket.on('startGame', () => {
@@ -528,6 +675,8 @@ io.on('connection', (socket) => {
     if (!actor) return socket.emit('errorMsg', 'It is not your turn.');
     const g = room.game;
     if (!g.currentBid) return socket.emit('errorMsg', 'There is no bid to believe yet.');
+    if (g.roundType === 'blind') return socket.emit('errorMsg', 'Believe cannot be used during a Blind Round.');
+    if (!engine.canBelieveNow(g)) return socket.emit('errorMsg', 'Believe is disabled — fewer than half the starting dice remain.');
 
     engine.resolveBelieve(g, actor.seat);
     enterReveal(room);
@@ -547,21 +696,15 @@ io.on('connection', (socket) => {
     broadcastState(room);
   });
 
+  // A client asks for this automatically once its reveal animation finishes —
+  // there is no manual "Start Next Round" button any more. The server still holds
+  // every client on the reveal for the same minimum window, and a safety timer
+  // (scheduleRevealAutoAdvance) covers the case where no client ever asks.
   socket.on('nextRound', () => {
     const room = roomOf();
     if (!room || room.phase !== 'reveal') return;      // guards double-advance
-    // hold every client on the reveal for the same minimum window
     if (room.revealAt && Date.now() - room.revealAt < REVEAL_MIN_MS) return;
-    const g = room.game;
-    const alive = engine.activePlayers(g);
-    if (alive.length <= 1) {
-      room.phase = 'gameover';
-    } else {
-      engine.startRound(g);
-      room.phase = 'playing';
-    }
-    g.reveal = null;
-    broadcastState(room);
+    advanceRound(room);
   });
 
   socket.on('playAgain', () => {
